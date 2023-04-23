@@ -1,9 +1,21 @@
 """
-Save images in folder dataset/images
-Generate a csv with path to image | protein sequence | localization label 
+Save images in folder dataset/images and generate ground_truth.csv
 """
+from bs4 import BeautifulSoup
+import numpy as np
+import pandas as pd
+import requests
+from tqdm import tqdm
 
-def scrape_image_urls(hpa_gene_id="ENSG00000147421", version="v22", color="blue_red_green"):
+def stem_hpa_image_url(image_url):
+    # Take the stem of the image_url, meaning
+    # remove the default 'blue_red_green.jpg' coloring
+    stem_idx = image_url.find("blue_red_green.jpg")
+    if stem_idx < 0:
+        print("error in ", image_url)
+    return image_url[:stem_idx]
+
+def scrape_image_urls(hpa_gene_id, organelle, gene_name, version="v22", color="blue_red_green"):
     """
     Function written previously by Yitong Tseo (Uhler Group)
     """
@@ -36,8 +48,11 @@ def scrape_image_urls(hpa_gene_id="ENSG00000147421", version="v22", color="blue_
                 {
                     "image_id": image_url.rsplit("/", 1)[-1],
                     "image_url": image_url,
+                    "gene_id": hpa_gene_id,
+                    "gene_name": gene_name,
                     "cell_line": cell_line.replace("-", "").replace(" ", ""),
                     "organ": organ,
+                    "organelle": organelle, #where it localized
                     "cellosaurusID": cellosaurus_id,
                     "antibody_hpa_id": antibody_id,
                     "antigen_sequence": antigen_seq,
@@ -49,4 +64,30 @@ def scrape_image_urls(hpa_gene_id="ENSG00000147421", version="v22", color="blue_
 
 if __name__ == "__main__":
 
+    subcell_df = pd.read_csv("dataset/subcellular_location.csv")
+    subcell_df = subcell_df[subcell_df["Approved"].notnull()]
+
+    # process downloaded csv into clean ground truth csv
+
+    scraped_images = []
+    for row in tqdm(subcell_df.iterrows()):
+        hpa_gene_id = row[1]["Gene"]
+        gene_name = row[1]["Gene name"]
+        organelle = row[1]["Approved"]
+        scraped_images.extend(scrape_image_urls(hpa_gene_id, organelle, gene_name))
+        print(f"Processed {hpa_gene_id} in {organelle}.")
     
+    image_df = pd.DataFrame.from_records(scraped_images)
+    image_df.to_csv("dataset/ground_truth.csv",index=False)
+
+    # use clean ground truth csv to download images
+
+    image_df = pd.read_csv("dataset/ground_truth_mini.csv")
+
+    for row in tqdm(image_df.iterrows()):
+        image_url = row[1]["image_url"]
+        image_name = row[1]["image_id"]
+        gene_name = row[1]["gene_name"]
+        img_data = requests.get(image_url).content
+        with open(f"dataset/images/{gene_name}_{image_name}", 'wb') as handler:
+            handler.write(img_data)
