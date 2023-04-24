@@ -70,24 +70,28 @@ if __name__ == "__main__":
     # process downloaded csv into clean ground truth csv
 
     scraped_images = []
+    i = 0
     for row in tqdm(subcell_df.iterrows()):
         hpa_gene_id = row[1]["Gene"]
         gene_name = row[1]["Gene name"]
         organelle = row[1]["Approved"]
         scraped_images.extend(scrape_image_urls(hpa_gene_id, organelle, gene_name))
         print(f"Processed {hpa_gene_id} in {organelle}.")
+        i+=1
+        if i == 1000:
+            break
     
     image_df = pd.DataFrame.from_records(scraped_images)
     image_df.to_csv("dataset/ground_truth.csv",index=False)
 
     # use clean ground truth csv to download images
 
-    image_df = pd.read_csv("dataset/ground_truth_mini.csv")
+    # image_df = pd.read_csv("dataset/ground_truth_mini.csv")
 
-    for row in tqdm(image_df.iterrows()):
-        image_url = row[1]["image_url"]
-        image_name = row[1]["image_id"]
-        gene_name = row[1]["gene_name"]
-        img_data = requests.get(image_url).content
-        with open(f"dataset/images/{gene_name}_{image_name}", 'wb') as handler:
-            handler.write(img_data)
+    # for row in tqdm(image_df.iterrows()):
+    #     image_url = row[1]["image_url"]
+    #     image_name = row[1]["image_id"]
+    #     gene_name = row[1]["gene_name"]
+    #     img_data = requests.get(image_url).content
+    #     with open(f"dataset/images/{gene_name}_{image_name}", 'wb') as handler:
+    #         handler.write(img_data)
