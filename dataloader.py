@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import os
 from PIL import Image
+import pickle
 import torch
 
 def normalize(image):
@@ -22,7 +23,7 @@ def get_esm2_emb(data, batch_converter, model):
     return seq_rep
 
 def load_data(image_dir):
-    ground_truth = pd.read_csv("dataset/ground_truth_mini.csv")
+    ground_truth = pd.read_csv("dataset/ground_truth.csv")
     data = {}
 
     model, alphabet = torch.hub.load("facebookresearch/esm:main", "esm2_t33_650M_UR50D")
@@ -57,6 +58,9 @@ def load_data(image_dir):
         else:
             data[gene_name]["image_arr"].append(normalized_pixels)
     
+    with open('data.pickle', 'wb') as handle:
+        pickle.dump(data, handle)
+
     return data
 
 

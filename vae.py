@@ -9,8 +9,11 @@ Contains VAE classes and experiments
 """
 import argparse
 import dataloader
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import pickle
+from PIL import Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,6 +21,8 @@ import torchvision
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 import random
+
+matplotlib.use('Agg')
 
 # convolutional variational autoencoder
 class VAE(nn.Module):
@@ -80,7 +85,7 @@ class VAE(nn.Module):
         # x is batch of images as a tensor of shape (N, 3, 2048, 2048)
 
         self.batch_size = x.shape[0]
-        hidden_rep = self.encoder(x).view(-1, self.hidden_dim)
+        hidden_rep = self.encoder(x).contiguous().view(self.batch_size, -1)
         mu = self.mu_fc(hidden_rep)
         logvar = self.logvar_fc(hidden_rep)
         return mu, logvar
@@ -91,7 +96,6 @@ class VAE(nn.Module):
         return output
 
     def forward(self, x):
-
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
         output = self.decode(z)
@@ -113,13 +117,16 @@ if __name__ == "__main__":
     parser.add_argument('--dec_stride', type=int, default=4)
     parser.add_argument('--dec_kernel_size', type=int, default=4)
     parser.add_argument('--learning_rate', type=int, default=1e-3)
-    parser.add_argument('--num_epochs', type=int, default=50)
+    parser.add_argument('--num_epochs', type=int, default=5)
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # data is a dict
-    data = dataloader.load_data("dataset/images")
+    # data = dataloader.load_data("dataset/images")
+
+    with open('data.pickle', 'rb') as handle:
+        data = pickle.load(handle)
 
     organelles = [] # ground truth in order
     gene_names = [] # ground truth in order
@@ -159,10 +166,13 @@ if __name__ == "__main__":
             print(f"Batch {batch_number} on epoch {epoch}.")
             
             try:
-                batch = np.concatenate(images_train[i : i + args.batch_size], axis=0).reshape((args.batch_size, 3, 2048, 2048))
+                reshaped_arrs = [array.reshape((1, 2048, 2048, 3)) for array in images_train[i : i+ args.batch_size]]
+                batch = np.concatenate(reshaped_arrs, axis=0)
+                batch = np.transpose(batch, (0,3,1,2))
             except Exception as e:
-                num_points = len(images_train[i : ])
-                batch = np.concatenate(images_train[i : ], axis=0).reshape((num_points, 3, 2048, 2048))
+                reshaped_arrs = [array.reshape((1, 2048, 2048, 3)) for array in images_train[i : ]]
+                batch = np.concatenate(reshaped_arrs, axis=0)
+                batch = np.transpose(batch, (0,3,1,2))
 
             batch = torch.from_numpy(batch).to(device)
             output, mu, logvar = model(batch) #output size is (5, 3, 1024,1024)
@@ -183,7 +193,7 @@ if __name__ == "__main__":
                 'loss': loss,
                 }, filename)
 
-    # checkpoint = torch.load("model_checkpoints/vanilla_autoencoder_epoch_49.pt")
+    # checkpoint = torch.load("model_checkpoints/vanilla_autoencoder_epoch_4.pt")
     # model.load_state_dict(checkpoint['model_state_dict'])
     
     # hold out test set
@@ -192,25 +202,36 @@ if __name__ == "__main__":
         print(f"Batch {batch_number} on test set.")
         
         try:
-            batch = np.concatenate(images_test[i : i + args.batch_size], axis=0).reshape((args.batch_size, 3, 2048, 2048))
+            reshaped_arrs = [array.reshape((1, 2048, 2048, 3)) for array in images_test[i : i + args.batch_size]]
+            batch = np.concatenate(reshaped_arrs, axis=0)
+            batch = np.transpose(batch, (0,3,1,2))
         except Exception as e:
-            num_points = len(images_test[i : ])
-            batch = np.concatenate(images_test[i : ], axis=0).reshape((num_points, 3, 2048, 2048))
+            reshaped_arrs = [array.reshape((1, 2048, 2048, 3)) for array in images_test[i : ]]
+            batch = np.concatenate(reshaped_arrs, axis=0)
+            batch = np.transpose(batch, (0,3,1,2))
 
         batch = torch.from_numpy(batch).to(device)
         output, mu, logvar = model(batch) #output size is (5, 3, 1024,1024)
         output = F.interpolate(output, size=(2048, 2048), mode='bilinear', align_corners=False)
 
-        batch = batch * 255
-        output = output * 255
+        true_img = images_test[0]
+        true_img = (true_img * 255).astype(np.uint8)
+        print(true_img.shape)
+        im = Image.fromarray(true_img).convert('RGB')
+        im.save(f'sample_image_db_{i}.jpeg')
 
-        print(batch.shape)
-        print(torch.min(batch))
-        print(torch.max(batch))
+        images_original = np.transpose(batch.cpu().detach().numpy(), (0, 2, 3, 1))
+        true_img = images_original[0]
+        true_img = (true_img * 255).astype(np.uint8)
+        print(true_img.shape)
+        im = Image.fromarray(true_img).convert('RGB')
+        im.save(f'sample_image_gt_{i}.jpeg')
 
-        print(output.shape)
-        print(torch.min(output))
-        print(torch.max(output))
+        images_pred = np.transpose(output.cpu().detach().numpy(), (0, 2, 3, 1))
+        pred_img = images_pred[0]
+        pred_img = (pred_img * 255).astype(np.uint8)
+        print(pred_img.shape)
+        im = Image.fromarray(pred_img).convert('RGB')
+        im.save(f'sample_image_pred_{i}.jpeg')
 
-        save_image(batch[0].data.cpu(), f'sample_image_gt_{i}.png')
-        save_image(output[0].data.cpu(), f'sample_image_pred_{i}.png')
+        break
