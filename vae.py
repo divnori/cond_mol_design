@@ -132,11 +132,10 @@ def contrastive_loss(original_x1, original_x2, recon_x1, recon_x2, latent_z1, la
     if dorg == 0:
       cont2 = torch.mean(torch.pow(euc_dist, 2))  # distance squared
     else:  # dorg == 1
-      delta = 0.1 - euc_dist  # sort of reverse distance, m is 0.1
+      delta = 0.1 - euc_dist  # sort of reverse distance
       delta = torch.clamp(delta, min=0.0, max=None)
       cont2 = torch.mean(torch.pow(delta, 2))  # mean over all rows
 
-    print(mse1, mse2, cont1, cont2)
     return mse1 + mse2 + cont1 + cont2
 
 if __name__ == "__main__":
@@ -149,7 +148,7 @@ if __name__ == "__main__":
     parser.add_argument('--dec_stride', type=int, default=5)
     parser.add_argument('--dec_kernel_size', type=int, default=7)
     parser.add_argument('--learning_rate', type=int, default=1e-3)
-    parser.add_argument('--num_epochs', type=int, default=10)
+    parser.add_argument('--num_epochs', type=int, default=100)
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -200,6 +199,13 @@ if __name__ == "__main__":
         organelles_test = organelles_test[:-1]
         organs_test = organs_test[:-1]
 
+    train = list(zip(images_train, gene_names_train, organelles_train))
+    random.shuffle(train)
+    images_train, gene_names_train, organelles_train = zip(*train)
+    test = list(zip(images_test, gene_names_test, organelles_test))
+    random.shuffle(test)
+    images_test, gene_names_test, organelles_test = zip(*test)
+
     print(f"Train/Test Dataset Sizes: {len(organelles_train)}/{len(organelles_test)}")
 
     model = VAE(in_channels=args.in_channels, latent_dim=args.latent_dim, 
@@ -208,6 +214,8 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     # train model
+    losses = []
+    train_embeddings = []
     for epoch in range(args.num_epochs):
 
         for i in range(0, len(images_train), args.batch_size):
@@ -237,13 +245,17 @@ if __name__ == "__main__":
             print(organs_train[i], organs_train[i+1], organelles_train[i], organelles_train[i+1])
             loss = contrastive_loss(batch[0:1],batch[1:2], y1, y2, z1, z2, organs_train[i], organs_train[i+1], organelles_train[i], organelles_train[i+1])
             print(f"Loss = {loss}.")
+            losses.append(loss)
+
+            if epoch == 9:
+                train_embeddings.append({"organelle":organelles_train[i], "organ":organs_train[i], "embedding": z1.cpu().detach().numpy(), "gene": gene_names_train[i]})
+                train_embeddings.append({"organelle":organelles_train[i+1], "organ":organs_train[i+1], "embedding": z2.cpu().detach().numpy(), "gene": gene_names_train[i+1]})
 
             if epoch % 9 == 0 and i % 100 == 0:
-                images_original = np.transpose(output.cpu().detach().numpy(), (0, 2, 3, 1))
-                true_img = images_original[0]
-                true_img = (true_img * 255).astype(np.uint8)
-                print(true_img.shape)
-                im = Image.fromarray(true_img).convert('RGB')
+                images_predicted = np.transpose(y1.cpu().detach().numpy(), (0, 2, 3, 1))
+                pred_img = images_predicted[0]
+                pred_img = (pred_img * 255).astype(np.uint8)
+                im = Image.fromarray(pred_img).convert('RGB')
                 im.save(f'sample_imgs_train/output_{epoch}_{i}.jpeg')
 
             optimizer.zero_grad()
@@ -258,36 +270,48 @@ if __name__ == "__main__":
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss,
                 }, filename)
+            
+            with open('figure_data/loss_curve_data.pickle', 'wb') as handle:
+                pickle.dump(losses, handle)
 
-    # checkpoint = torch.load("model_checkpoints/vanilla_autoencoder_mseloss_100dp_epoch_499.pt")
-    # model.load_state_dict(checkpoint['model_state_dict'])
+            with open('figure_data/train_embeddings.pickle', 'wb') as handle:
+                pickle.dump(train_embeddings, handle)
+
+    checkpoint = torch.load("model_checkpoints/contrastive_autoencoder_epoch_9.pt")
+    model.load_state_dict(checkpoint['model_state_dict'])
 
     # hold out test set
-    # for i in range(0, len(images_test), args.batch_size):
-    #     batch_number = i // args.batch_size
-    #     print(f"Batch {batch_number} on test set.")
-        
-    #     try:
-    #         reshaped_arrs = [array.reshape((1, 2048, 2048, 3)) for array in images_test[i : i + args.batch_size]]
-    #         batch = np.concatenate(reshaped_arrs, axis=0)
-    #         batch = np.transpose(batch, (0,3,1,2))
-    #     except Exception as e:
-    #         reshaped_arrs = [array.reshape((1, 2048, 2048, 3)) for array in images_test[i : ]]
-    #         batch = np.concatenate(reshaped_arrs, axis=0)
-    #         batch = np.transpose(batch, (0,3,1,2))
+    val_embeddings = []
+    for i in range(0, len(images_test), args.batch_size):
+        try:
+            batch_number = i // args.batch_size
+            print(f"Batch {batch_number} on test set.")
+            
+            reshaped_arrs = [array.reshape((1, 2048, 2048, 3)) for array in images_test[i : i + args.batch_size]]
+            batch = np.concatenate(reshaped_arrs, axis=0)
+            batch = np.transpose(batch, (0,3,1,2))
+            batch = torch.from_numpy(batch).to(device)
 
-    #     batch = torch.from_numpy(batch).to(device)
-    #     output, mu, logvar = model(batch) #output size is (5, 3, 1024,1024)
-    #     output = F.interpolate(output, size=(2048, 2048), mode='bilinear', align_corners=False)
+            y1, y2, z1, z2 = model(batch[0:1],batch[1:2]) #output size is (2, 3, 1024,1024)
+            y1 = F.interpolate(y1, size=(2048, 2048), mode='bilinear', align_corners=False)
+            y2 = F.interpolate(y2, size=(2048, 2048), mode='bilinear', align_corners=False)
 
-    #     images_original = np.transpose(batch.cpu().detach().numpy(), (0, 2, 3, 1))
-    #     true_img = images_original[0]
-    #     true_img = (true_img * 255).astype(np.uint8)
-    #     im = Image.fromarray(true_img).convert('RGB')
-    #     im.save(f'sample_imgs_val/batch_{i}.jpeg')
+            images_original = np.transpose(batch.cpu().detach().numpy(), (0, 2, 3, 1))
+            true_img = images_original[0]
+            true_img = (true_img * 255).astype(np.uint8)
+            im = Image.fromarray(true_img).convert('RGB')
+            im.save(f'sample_imgs_val/batch_{i}.jpeg')
 
-    #     images_original = np.transpose(output.cpu().detach().numpy(), (0, 2, 3, 1))
-    #     true_img = images_original[0]
-    #     true_img = (true_img * 255).astype(np.uint8)
-    #     im = Image.fromarray(true_img).convert('RGB')
-    #     im.save(f'sample_imgs_val/output_{i}.jpeg')
+            images_predicted = np.transpose(y1.cpu().detach().numpy(), (0, 2, 3, 1))
+            pred_img = images_predicted[0]
+            pred_img = (pred_img * 255).astype(np.uint8)
+            im = Image.fromarray(pred_img).convert('RGB')
+            im.save(f'sample_imgs_val/output_{i}.jpeg')
+
+            val_embeddings.append({"organelle":organelles_test[i], "organ":organs_test[i], "embedding": z1.cpu().detach().numpy(), "gene": gene_names_test[i]})
+            val_embeddings.append({"organelle":organelles_test[i+1], "organ":organs_test[i+1], "embedding": z2.cpu().detach().numpy(), "gene": gene_names_test[i+1]})
+        except:
+            pass
+
+    with open('figure_data/val_embeddings.pickle', 'wb') as handle:
+        pickle.dump(val_embeddings, handle)

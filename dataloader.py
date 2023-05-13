@@ -45,7 +45,7 @@ def process_organelle(organelle_str):
     organelle = ""
     for word in words:
         if word.lower() in organelle_options:
-            organelle = word
+            organelle = word.lower()
         elif word.lower() in nucleus_alternatives:
             organelle = "nucleus"
     if len(organelle) == 0:
