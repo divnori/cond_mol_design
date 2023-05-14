@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import pickle
+from PIL import Image
 import pandas as pd
 import random
 import seaborn as sns
@@ -10,15 +11,27 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import umap
 
+import math
+import rdkit
+from rdkit.Chem.Draw import MolsToGridImage
+from rdkit.Chem.rdmolfiles import SmilesMolSupplier
+
+import dataloader
+
 def loss_curve(loss_pickle):
 
     with open(loss_pickle, 'rb') as pickle_result:
         loss_list = pickle.load(pickle_result)
 
+    loss_list = loss_list[:50]
+
     loss_list = [l.item() for l in loss_list]
 
     sns.set_style("darkgrid")
     plt.plot(np.array(loss_list))
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training Loss")
     plt.savefig("figures/train_loss_curve.png")
 
 
@@ -96,12 +109,32 @@ def build_embedding_df(emb_pickle, color_criteria):
     df.to_pickle(f"figure_data/val_emb_{color_criteria}_df.pkl")
     return df
 
+def draw_molecules(smi_file):
+    # load molecules from file
+    mols = SmilesMolSupplier(smi_file, sanitize=True, nameColumn=-1)
+
+    n_samples = 20
+    mols_list = [mol for mol in mols]
+    mols_sampled = random.sample(mols_list, n_samples)  # sample 100 random molecules to visualize
+
+    mols_per_row = int(math.sqrt(n_samples))            # make a square grid
+
+    labels=list(range(n_samples))       # label structures with a number
+
+    # draw the molecules (creates a PIL image)
+    img = MolsToGridImage(mols=mols_sampled,
+                        molsPerRow=mols_per_row,
+                        legends=[str(i) for i in labels])
+
+    img.save("figures/molecules_control.png")
+
 if __name__ == "__main__":
     # loss_curve("figure_data/loss_curve_data.pickle")
 
     # df = build_embedding_df("figure_data/val_embeddings.pickle","organelle")
     
-    with open("figure_data/val_emb_organelle_df.pkl", 'rb') as pickle_result:
-        df = pickle.load(pickle_result)
+    # with open("figure_data/val_emb_organelle_df.pkl", 'rb') as pickle_result:
+    #     df = pickle.load(pickle_result)
 
-    pca_embeddings(df, "organelle")
+    # pca_embeddings(df, "organelle")
+    pass
